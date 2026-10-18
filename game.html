@@ -1,0 +1,648 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Turbo Racing | Neon Edition</title>
+
+<style>
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background:
+      radial-gradient(ellipse at top, #18334b, #080c15 70%);
+    color: #f4fbff;
+    font-family: Arial, sans-serif;
+    text-align: center;
+  }
+
+  .header { padding: 18px 10px 8px; }
+
+  h1 {
+    margin: 0;
+    color: #38eaff;
+    font-size: clamp(25px, 5vw, 38px);
+    letter-spacing: 3px;
+    text-shadow: 0 0 18px #00cfff88;
+  }
+
+  .subtitle {
+    color: #9eb5c9;
+    font-size: 13px;
+    letter-spacing: 2px;
+    margin: 8px 0 15px;
+  }
+
+  .dashboard {
+    width: min(420px, 96vw);
+    margin: 0 auto 10px;
+    display: flex;
+    justify-content: space-around;
+    gap: 8px;
+  }
+
+  .panel {
+    flex: 1;
+    background: #111e2d;
+    border: 1px solid #24445a;
+    border-radius: 10px;
+    padding: 10px 5px;
+    box-shadow: inset 0 0 15px #00cfff08;
+  }
+
+  .panel small {
+    display: block;
+    color: #8faec3;
+    font-size: 10px;
+    letter-spacing: 2px;
+    margin-bottom: 5px;
+  }
+
+  .panel strong {
+    font-size: 21px;
+    color: #46eaff;
+  }
+
+  .game-wrap {
+    position: relative;
+    width: min(420px, 96vw);
+    margin: auto;
+    border: 2px solid #26dfff;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 0 24px #00cfff30;
+    background: #30353c;
+  }
+
+  canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
+  #overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 12px;
+    padding: 20px;
+    background: #050b15d9;
+  }
+
+  #overlay.hidden { display: none; }
+
+  #overlay h2 {
+    margin: 0;
+    font-size: clamp(27px, 7vw, 42px);
+    color: #46eaff;
+    text-shadow: 0 0 20px #00dfff77;
+  }
+
+  #overlay p {
+    margin: 0;
+    color: #d1e5f1;
+    line-height: 1.6;
+  }
+
+  button {
+    border: 0;
+    border-radius: 8px;
+    padding: 12px 20px;
+    background: #35e5ff;
+    color: #07121c;
+    font-weight: bold;
+    font-size: 15px;
+    cursor: pointer;
+    box-shadow: 0 0 15px #00dfff33;
+  }
+
+  button:hover { background: white; }
+
+  .controls {
+    width: min(420px, 96vw);
+    margin: 12px auto;
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .controls button {
+    width: 48%;
+    padding: 15px;
+    font-size: 20px;
+    touch-action: none;
+    user-select: none;
+  }
+
+  .hint {
+    color: #8faec3;
+    font-size: 12px;
+    padding: 0 12px 20px;
+  }
+</style>
+</head>
+
+<body>
+  <div class="header">
+    <h1>TURBO RACING</h1>
+    <div class="subtitle">NEON EDITION · ARCADE SERIES</div>
+  </div>
+
+  <div class="dashboard">
+    <div class="panel">
+      <small>SCORE</small>
+      <strong id="score">0000</strong>
+    </div>
+    <div class="panel">
+      <small>SPEED</small>
+      <strong><span id="speed">120</span> <small style="display:inline">KM/H</small></strong>
+    </div>
+    <div class="panel">
+      <small>BEST</small>
+      <strong id="best">0000</strong>
+    </div>
+  </div>
+
+  <div class="game-wrap">
+    <canvas id="game" width="420" height="700"></canvas>
+
+    <div id="overlay">
+      <h2 id="overlayTitle">READY TO RACE?</h2>
+      <p id="overlayText">
+        Dodge traffic and chase your high score.<br>
+        Use the arrow keys or A / D.
+      </p>
+      <button id="startBtn">START RACE</button>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button id="leftBtn">◀ LEFT</button>
+    <button id="rightBtn">RIGHT ▶</button>
+  </div>
+
+  <div class="hint">
+    Arrow keys / A and D to steer · Avoid traffic · Don't crash!
+  </div>
+
+<script>
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+
+  const scoreEl = document.getElementById("score");
+  const speedEl = document.getElementById("speed");
+  const bestEl = document.getElementById("best");
+  const overlay = document.getElementById("overlay");
+  const overlayTitle = document.getElementById("overlayTitle");
+  const overlayText = document.getElementById("overlayText");
+  const startBtn = document.getElementById("startBtn");
+
+  const W = canvas.width;
+  const H = canvas.height;
+  const roadLeft = 48;
+  const roadRight = 372;
+  const lanes = [102, 210, 318];
+
+  let player, enemies, particles;
+  let score = 0;
+  let best = 0;
+  let roadOffset = 0;
+  let spawnTimer = 0;
+  let lastTime = 0;
+  let running = false;
+  let animationId = 0;
+  let keys = {};
+  let touchDirection = 0;
+  let speed = 120;
+
+  // Read the saved high score safely.
+  try {
+    best = Number(localStorage.getItem("turboBest")) || 0;
+  } catch (e) {
+    best = 0;
+  }
+
+  bestEl.textContent = String(best).padStart(4, "0");
+
+  function resetGame() {
+    player = {
+      x: 189,
+      y: 565,
+      w: 42,
+      h: 78
+    };
+
+    enemies = [];
+    particles = [];
+    score = 0;
+    speed = 120;
+    roadOffset = 0;
+    spawnTimer = 0;
+    lastTime = 0;
+    keys = {};
+    touchDirection = 0;
+
+    scoreEl.textContent = "0000";
+    speedEl.textContent = speed;
+  }
+
+  function roundedRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, r);
+    ctx.fill();
+  }
+
+  // Draw the detailed road and moving lane markings.
+  function drawRoad(dt) {
+    // Grass
+    ctx.fillStyle = "#173c2b";
+    ctx.fillRect(0, 0, W, H);
+
+    // Subtle grass stripes
+    ctx.fillStyle = "#205039";
+    for (let y = -40 + roadOffset % 80; y < H; y += 80) {
+      ctx.fillRect(0, y, roadLeft - 5, 35);
+      ctx.fillRect(roadRight + 5, y, W - roadRight, 35);
+    }
+
+    // Road shadow
+    ctx.fillStyle = "#070a10";
+    ctx.fillRect(roadLeft - 9, 0, roadRight - roadLeft + 18, H);
+
+    // Asphalt
+    ctx.fillStyle = "#303740";
+    ctx.fillRect(roadLeft, 0, roadRight - roadLeft, H);
+
+    // Asphalt texture
+    ctx.fillStyle = "#3a424b";
+    for (let y = -60 + roadOffset % 120; y < H; y += 120) {
+      ctx.fillRect(roadLeft + 25, y, 3, 25);
+      ctx.fillRect(roadRight - 60, y + 38, 3, 18);
+    }
+
+    // Striped roadside curbs
+    const curbOffset = roadOffset % 50;
+    for (let y = -50 + curbOffset; y < H; y += 50) {
+      ctx.fillStyle = "#f4f5f7";
+      ctx.fillRect(roadLeft - 5, y, 6, 25);
+      ctx.fillRect(roadRight - 1, y, 6, 25);
+
+      ctx.fillStyle = "#ed4652";
+      ctx.fillRect(roadLeft - 5, y + 25, 6, 25);
+      ctx.fillRect(roadRight - 1, y + 25, 6, 25);
+    }
+
+    // Road boundary lines
+    ctx.fillStyle = "#d8f8ff";
+    ctx.fillRect(roadLeft + 5, 0, 2, H);
+    ctx.fillRect(roadRight - 7, 0, 2, H);
+
+    // Dashed lane lines
+    for (let y = -70 + roadOffset % 90; y < H; y += 90) {
+      ctx.fillStyle = "#f5f6f3";
+      ctx.fillRect(155, y, 4, 48);
+      ctx.fillRect(261, y, 4, 48);
+    }
+
+    roadOffset += speed * 1.45 * dt;
+  }
+
+  // Draw a sports car from the top.
+  function drawCar(car, color, isPlayer = false) {
+    const x = car.x;
+    const y = car.y;
+    const w = car.w;
+    const h = car.h;
+
+    ctx.save();
+    ctx.translate(x + w / 2, y);
+    ctx.scale(w / 42, h / 78);
+    ctx.translate(-21, 0);
+
+    // Neon glow beneath player's car
+    if (isPlayer) {
+      ctx.shadowColor = "#00dcff";
+      ctx.shadowBlur = 20;
+    }
+
+    // Ground shadow
+    ctx.fillStyle = "#090c12";
+    roundedRect(1, 5, 42, 76, 9);
+    ctx.shadowBlur = 0;
+
+    // Wheels
+    ctx.fillStyle = "#080b10";
+    roundedRect(-1, 13, 8, 19, 3);
+    roundedRect(35, 13, 8, 19, 3);
+    roundedRect(-1, 49, 8, 19, 3);
+    roundedRect(35, 49, 8, 19, 3);
+
+    // Main body
+    const gradient = ctx.createLinearGradient(0, 0, 42, 0);
+    gradient.addColorStop(0, "#242b34");
+    gradient.addColorStop(0.22, color);
+    gradient.addColorStop(0.72, color);
+    gradient.addColorStop(1, "#171c24");
+
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.moveTo(11, 1);
+    ctx.quadraticCurveTo(21, -2, 31, 1);
+    ctx.lineTo(39, 17);
+    ctx.lineTo(38, 61);
+    ctx.quadraticCurveTo(38, 75, 29, 77);
+    ctx.lineTo(13, 77);
+    ctx.quadraticCurveTo(4, 75, 4, 61);
+    ctx.lineTo(3, 17);
+    ctx.closePath();
+    ctx.fill();
+
+    // Hood highlight
+    ctx.fillStyle = "#ffffff24";
+    ctx.beginPath();
+    ctx.moveTo(12, 7);
+    ctx.lineTo(30, 7);
+    ctx.lineTo(34, 22);
+    ctx.lineTo(8, 22);
+    ctx.closePath();
+    ctx.fill();
+
+    // Front windshield
+    ctx.fillStyle = "#102738";
+    ctx.beginPath();
+    ctx.moveTo(11, 23);
+    ctx.lineTo(31, 23);
+    ctx.lineTo(34, 36);
+    ctx.lineTo(8, 36);
+    ctx.closePath();
+    ctx.fill();
+
+    // Windshield reflection
+    ctx.fillStyle = "#b9efff55";
+    ctx.fillRect(12, 25, 4, 8);
+
+    // Rear windshield
+    ctx.fillStyle = "#10202e";
+    ctx.beginPath();
+    ctx.moveTo(8, 42);
+    ctx.lineTo(34, 42);
+    ctx.lineTo(30, 53);
+    ctx.lineTo(12, 53);
+    ctx.closePath();
+    ctx.fill();
+
+    // Center racing stripe
+    if (isPlayer) {
+      ctx.fillStyle = "#f2fcff";
+      ctx.fillRect(19, 7, 4, 13);
+      ctx.fillRect(19, 56, 4, 14);
+    }
+
+    // Side mirrors
+    ctx.fillStyle = color;
+    roundedRect(0, 27, 6, 10, 2);
+    roundedRect(36, 27, 6, 10, 2);
+
+    // Headlights
+    ctx.shadowColor = "#e5ffff";
+    ctx.shadowBlur = 9;
+    ctx.fillStyle = "#eaffff";
+    roundedRect(5, 2, 9, 5, 2);
+    roundedRect(28, 2, 9, 5, 2);
+    ctx.shadowBlur = 0;
+
+    // Rear lights
+    ctx.fillStyle = "#ff344c";
+    roundedRect(5, 70, 10, 5, 2);
+    roundedRect(27, 70, 10, 5, 2);
+
+    // Bumpers
+    ctx.fillStyle = "#9ca8b3";
+    ctx.fillRect(12, 0, 18, 2);
+    ctx.fillRect(12, 76, 18, 2);
+
+    ctx.restore();
+  }
+
+  function spawnEnemy() {
+    // Avoid spawning directly on top of another car.
+    const available = lanes.filter(lane =>
+      !enemies.some(e => e.lane === lane && e.y < 155)
+    );
+
+    if (available.length === 0) return;
+
+    const lane = available[
+      Math.floor(Math.random() * available.length)
+    ];
+
+    const colors = ["#ff3d58", "#ffb52e", "#b66bff", "#e7edf4"];
+
+    enemies.push({
+      x: lane - 21,
+      y: -90,
+      w: 42,
+      h: 78,
+      lane,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      counted: false
+    });
+  }
+
+  function hitTest(a, b) {
+    return (
+      a.x + 9 < b.x + b.w - 9 &&
+      a.x + a.w - 9 > b.x + 9 &&
+      a.y + 10 < b.y + b.h - 10 &&
+      a.y + a.h - 10 > b.y + 10
+    );
+  }
+
+  function makeCrashParticles() {
+    for (let i = 0; i < 30; i++) {
+      particles.push({
+        x: player.x + player.w / 2,
+        y: player.y + player.h / 2,
+        vx: (Math.random() - 0.5) * 360,
+        vy: (Math.random() - 0.5) * 360,
+        life: 0.8,
+        color: ["#38eaff", "#ffffff", "#ffb52e"][
+          Math.floor(Math.random() * 3)
+        ]
+      });
+    }
+  }
+
+  function drawParticles(dt) {
+    for (const p of particles) {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.life -= dt;
+
+      ctx.globalAlpha = Math.max(0, p.life / 0.8);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(p.x, p.y, 5, 5);
+    }
+    ctx.globalAlpha = 1;
+
+    particles = particles.filter(p => p.life > 0);
+  }
+
+  function finishGame() {
+    running = false;
+    makeCrashParticles();
+
+    try {
+      if (score > best) {
+        best = score;
+        localStorage.setItem("turboBest", String(best));
+      }
+    } catch (e) {
+      // The game still works if browser storage is unavailable.
+    }
+
+    bestEl.textContent = String(best).padStart(4, "0");
+    overlayTitle.textContent = "RACE OVER!";
+    overlayText.innerHTML =
+      "Final score: " + score +
+      "<br>Best score: " + best +
+      "<br>Ready for another race?";
+
+    startBtn.textContent = "RACE AGAIN";
+    overlay.classList.remove("hidden");
+  }
+
+  function gameLoop(time) {
+    if (!running) return;
+
+    if (!lastTime) lastTime = time;
+
+    const dt = Math.min((time - lastTime) / 1000, 0.04);
+    lastTime = time;
+
+    drawRoad(dt);
+
+    // Gradually increase speed.
+    speed = Math.min(120 + Math.floor(score / 3) * 3, 270);
+    speedEl.textContent = speed;
+
+    // Keyboard and touch steering.
+    let direction = 0;
+
+    if (keys["arrowleft"] || keys["a"]) direction -= 1;
+    if (keys["arrowright"] || keys["d"]) direction += 1;
+    direction = touchDirection || direction;
+
+    player.x += direction * 300 * dt;
+    player.x = Math.max(
+      roadLeft + 8,
+      Math.min(roadRight - player.w - 8, player.x)
+    );
+
+    // Spawn traffic more frequently as the score increases.
+    spawnTimer += dt * 1000;
+    const delay = Math.max(480, 1050 - score * 2);
+
+    if (spawnTimer >= delay) {
+      spawnTimer = 0;
+      spawnEnemy();
+    }
+
+    for (const enemy of enemies) {
+      enemy.y += speed * 1.4 * dt;
+
+      if (hitTest(player, enemy)) {
+        finishGame();
+        break;
+      }
+
+      if (!enemy.counted && enemy.y > player.y + player.h) {
+        enemy.counted = true;
+        score += 1;
+        scoreEl.textContent = String(score).padStart(4, "0");
+      }
+
+      drawCar(enemy, enemy.color);
+    }
+
+    enemies = enemies.filter(e => e.y < H + 100);
+
+    drawCar(player, "#00dfff", true);
+    drawParticles(dt);
+
+    if (running) {
+      animationId = requestAnimationFrame(gameLoop);
+    }
+  }
+
+  function startGame() {
+    cancelAnimationFrame(animationId);
+    resetGame();
+    overlay.classList.add("hidden");
+    running = true;
+    animationId = requestAnimationFrame(gameLoop);
+  }
+
+  startBtn.addEventListener("click", startGame);
+
+  document.addEventListener("keydown", e => {
+    const key = e.key.toLowerCase();
+
+    if (["arrowleft", "arrowright", " "].includes(key)) {
+      e.preventDefault();
+    }
+
+    keys[key] = true;
+  });
+
+  document.addEventListener("keyup", e => {
+    keys[e.key.toLowerCase()] = false;
+  });
+
+  window.addEventListener("blur", () => {
+    keys = {};
+    touchDirection = 0;
+  });
+
+  function bindSteering(id, direction) {
+    const button = document.getElementById(id);
+
+    button.addEventListener("pointerdown", e => {
+      e.preventDefault();
+      touchDirection = direction;
+      button.setPointerCapture(e.pointerId);
+    });
+
+    function release() {
+      if (touchDirection === direction) touchDirection = 0;
+    }
+
+    button.addEventListener("pointerup", release);
+    button.addEventListener("pointercancel", release);
+    button.addEventListener("lostpointercapture", release);
+  }
+
+  bindSteering("leftBtn", -1);
+  bindSteering("rightBtn", 1);
+
+  // Draw the road behind the start screen.
+  resetGame();
+  drawRoad(0);
+  drawCar(player, "#00dfff", true);
+  drawCar(
+    { x: 84, y: 180, w: 42, h: 78 },
+    "#ff3d58"
+  );
+  drawCar(
+    { x: 294, y: 340, w: 42, h: 78 },
+    "#ffb52e"
+  );
+</script>
+</body>
+</html>
